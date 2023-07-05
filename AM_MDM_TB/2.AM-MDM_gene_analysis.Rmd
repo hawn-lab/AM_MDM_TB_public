@@ -1,0 +1,212 @@
+---
+title: "RNA-seq of AM and MDM infected with MtB"
+subtitle: "Differential gene expression"
+author: "Kim Dill-McFarland, kadm@uw.edu"
+date: "version `r format(Sys.time(), '%B %d, %Y')`"
+output:
+  html_document:
+    toc: yes
+    toc_float:
+      collapsed: no
+editor_options:
+  chunk_output_type: console
+---
+# Background
+
+This workflow determines differentially expressed genes in AM/MDM with and without Mtb-infection.
+
+# Setup
+Load packages
+
+```{r message=FALSE, warning=FALSE}
+# Data manipulation and figures
+library(tidyverse)
+library(patchwork)
+library(BIGpicture)
+library(venn)
+
+# Linear models
+library(limma)
+library(kimma)
+
+#Print pretty tables to Rmd
+library(knitr)
+library(kableExtra)
+  options(knitr.kable.NA = '')
+
+`%notin%` <- Negate(`%in%`)
+```
+
+Set seed
+
+```{r}
+set.seed(4389)
+```
+
+Make output directories.
+
+```{r}
+dir.create("results/gene_level", recursive = TRUE, showWarnings = FALSE)
+```
+
+# Load data
+
+Cleaned data created in [AM-MDM data cleaning](1.AM-MDM_data_cleaning.html)
+
+```{r}
+#Load data
+load("data_clean/AM-MDM_voom.RData")
+```
+
+This includes in the following samples.
+
+```{r echo=FALSE}
+dat.voom$targets %>% 
+  group_by(cell, TB) %>% 
+  tally() %>% 
+  
+  kable(align="l") %>% 
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+# Differential expression
+## PCA
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, fig.height=4}
+plot_pca(dat.voom, vars = c("cell","TB","ptID")) %>% 
+  wrap_plots(ncol=1)
+```
+
+## Linear mixed effects model (kimma)
+
+```{r eval=FALSE}
+AM.MDM_kimma_pval <- kmFit(dat.voom, model = "~cell*TB + (1|ptID)",
+                            run.lme = TRUE, run.contrast = TRUE, 
+                            use.weights = TRUE,
+                            metrics = TRUE, contrast.var = "cell:TB")
+#save
+save(AM.MDM_kimma_pval, file="results/gene_level/kimma_lme_cell_TB.RData")
+```
+
+### Summarize gene model 
+
+```{r echo=FALSE}
+load("results/gene_level/kimma_lme_cell_TB.RData")
+contrast.OI <- data.frame(
+  contrast_ref = c("AM Media", "AM Media",  "MDM Media", "AM TB"),
+  contrast_lvl = c("AM TB", "MDM Media", "MDM TB", "MDM TB")
+)
+
+AM.MDM_kimma_pval$lme.contrast.filter <- AM.MDM_kimma_pval$lme.contrast %>% 
+   inner_join(contrast.OI)
+
+summarise_kmFit(AM.MDM_kimma_pval$lme.contrast.filter) %>% 
+  select(-variable)
+```
+
+## Significant genes
+
+Significant genes includes those that change with Mtb-infection (left) **and** differ between cell types (right). All contrasts are assessed at FDR < 0.05
+
+```{r echo=FALSE}
+fdr.cutoff <- 0.05
+plot_venn_genes(list("kimma"=AM.MDM_kimma_pval$lme.contrast.filter), 
+                      fdr.cutoff = fdr.cutoff)$venn[[1]] +
+  ggtitle("kimma")
+```
+
+Within this overlap, Mtb impacted genes that are also differ by cell type 
+
+```{r echo=FALSE}
+#List genes significant for cell within a TB condition
+signif.wIn.condition <- AM.MDM_kimma_pval$lme.contrast %>% 
+  filter((grepl("Media", contrast_ref) & grepl("Media", contrast_lvl)) |
+         (grepl("TB", contrast_ref) & grepl("TB", contrast_lvl))) %>% 
+  filter(FDR <= fdr.cutoff) %>% 
+  pull(gene) %>% unique()
+
+for(cell in c("AM","MDM")){
+  for(direction in c("up","down")){
+    name <- paste("kimma",cell, direction, sep=".")
+    
+    if(direction == "up"){
+      genes <- AM.MDM_kimma_pval$lme.contrast %>% 
+        filter(grepl(cell, contrast_ref) & grepl(cell, contrast_lvl) &
+                 FDR <= fdr.cutoff & estimate > 0 &
+                 gene %in% signif.wIn.condition) %>% 
+        pull(gene)
+    }else{
+      genes <- AM.MDM_kimma_pval$lme.contrast %>% 
+        filter(grepl(cell, contrast_ref) & grepl(cell, contrast_lvl) &
+                 FDR <= fdr.cutoff & estimate < 0 &
+                 gene %in% signif.wIn.condition) %>% 
+        pull(gene)
+    }
+    
+    assign(name, genes, envir = .GlobalEnv)
+  }}
+```
+
+```{r echo=FALSE}
+venn(ilab=FALSE, zcolor = "style",ilcs=1,sncs=1.5,box = FALSE,
+     snames=c("AM expression\n+Mtb > media",
+              "AM expression\n+Mtb < media",
+              "MDM expression\n+Mtb > media",
+              "MDM expression\n+Mtb < media"),
+     x=list(kimma.AM.up,kimma.AM.down,kimma.MDM.up,kimma.MDM.down), 
+)
+title("kimma", line = -2)
+```
+
+List of these genes can be found in `results/gene_level/AM-MDM_venn.signif*`
+
+```{r message=FALSE, echo=FALSE}
+#Save gene lists
+signif.ls <- list()
+
+signif.ls[["AM.up.only"]] <- kimma.AM.up[kimma.AM.up %notin%
+                           unique(c(kimma.AM.down,kimma.MDM.up,kimma.MDM.down))]
+signif.ls[["AM.down.only"]] <- kimma.AM.down[kimma.AM.down %notin%
+                           unique(c(kimma.AM.up,kimma.MDM.up,kimma.MDM.down))]
+signif.ls[["AM.up_MDM.up"]] <- kimma.AM.up[kimma.AM.up %in% kimma.MDM.up]
+signif.ls[["AM.up_MDM.down"]] <- kimma.AM.up[kimma.AM.up %in% kimma.MDM.down]
+signif.ls[["AM.down_MDM.up"]] <- kimma.AM.down[kimma.AM.down %in% kimma.MDM.up]
+signif.ls[["AM.down_MDM.down"]] <- kimma.AM.down[kimma.AM.down %in% kimma.MDM.down]
+signif.ls[["MDM.up.only"]] <- kimma.MDM.up[kimma.MDM.up %notin%
+                           unique(c(kimma.MDM.down,kimma.AM.up,kimma.AM.down))]
+signif.ls[["MDM.down.only"]] <- kimma.MDM.down[kimma.MDM.down %notin%
+                           unique(c(kimma.MDM.up,kimma.AM.up,kimma.AM.down))]
+#Convert to df
+indx <- sapply(signif.ls, length)
+
+signif.df <- as.data.frame(do.call(rbind, lapply(signif.ls, `length<-`,
+                                          max(indx)))) %>% 
+  t() %>% as.data.frame() 
+
+#save df
+signif.df %>%
+write_csv(., file="results/gene_level/AM-MDM_kimma.venn.signif.ensembl.csv", na="")
+
+#Symbol version
+signif.df2 <- signif.df %>% 
+  rownames_to_column() %>% 
+  pivot_longer(-rowname, values_to = "ensembl_gene_id") %>% 
+  left_join(dat.voom$genes %>% 
+              select(ensembl_gene_id, symbol)) %>% 
+  select(rowname, name, symbol) %>% 
+  mutate(symbol = as.character(symbol),
+         symbol = ifelse(symbol == "NULL",NA,symbol)) %>% 
+  pivot_wider(values_from = symbol) %>% 
+  select(-rowname)
+# signif.df2$AM.up.only[grepl("IFN",signif.df2$AM.up.only)]
+write_csv(signif.df2,
+file="results/gene_level/AM-MDM_kimma.venn.signif.hugo.csv", na="")
+```
+
+# R session
+
+```{r}
+sessionInfo()
+```
+
+***

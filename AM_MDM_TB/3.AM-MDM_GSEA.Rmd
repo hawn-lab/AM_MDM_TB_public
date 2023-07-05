@@ -1,0 +1,419 @@
+---
+title: "RNA-seq of AM and MDM infected with TB"
+subtitle: "Gene set enrichment analysis (GSEA)"
+author: "Kim Dill-McFarland, kadm@uw.edu"
+date: "version `r format(Sys.time(), '%B %d, %Y')`"
+output:
+  html_document:
+    toc: yes
+    toc_float:
+      collapsed: no
+editor_options:
+  chunk_output_type: console
+---
+# Background
+
+The purpose of this workflow is to perform GSEA of Mtb-infected vs media expression in AM vs MDM cells. Gene sets are from the Broad Molecular Signature Database ([MSigDB](https://www.gsea-msigdb.org/gsea/msigdb/collections.jsp)).
+
+# Setup
+Load packages
+
+```{r message=FALSE, warning=FALSE}
+# Data manipulation and figures
+library(tidyverse)
+library(BIGpicture)
+library(venn)
+
+#GSEA
+library(SEARchways)
+library(msigdbr)
+library(org.Hs.eg.db)
+
+#Print pretty tables to Rmd
+library(knitr)
+library(kableExtra)
+
+`%notin%` <- Negate(`%in%`)
+select <- dplyr::select
+rename <- dplyr::rename
+```
+
+Set seed
+
+```{r}
+set.seed(4389)
+```
+
+# Load data
+
+```{r results.data, message=FALSE, warning=FALSE}
+load("results/gene_level/kimma_lme_cell_TB.RData")
+#Significant gene lists from venns
+gene_signif_kimma <- read_csv("results/gene_level/AM-MDM_kimma.venn.signif.ensembl.csv")
+gene_signif_kimma.hgnc <- read_csv("results/gene_level/AM-MDM_kimma.venn.signif.hugo.csv")
+```
+
+# Gene set enrichment analysis (GSEA)
+Gene ontology ([GO](http://geneontology.org/)) provides gene functions and annotations from a variety of sources. Specifics on the gene sets below can be found at <http://software.broadinstitute.org/gsea/msigdb/collections.jsp>.
+
+## Format data
+
+```{r}
+contrast.OI <- data.frame(
+  contrast_ref = c("AM Media", "AM Media",  "MDM Media", "AM TB"),
+  contrast_lvl = c("AM TB",    "MDM Media", "MDM TB",    "MDM TB")
+)
+
+kimma_df <- AM.MDM_kimma_pval$lme.contrast %>% 
+  inner_join(contrast.OI) %>% 
+  mutate(across(contrast_ref:contrast_lvl, ~gsub(" ", "_", .))) %>% 
+  mutate(group = paste(contrast_lvl, contrast_ref, sep = "-")) %>% 
+  dplyr::select(group, gene, estimate)
+```
+
+## Run GSEA
+#### Hallmark (H)
+
+```{r h, eval=FALSE}
+gsea_h_kimma <- BIGsea(gene_df = kimma_df, ID = "ENSEMBL", category = "H")
+```
+
+#### Curated gene sets (C2 CP)
+
+```{r c2, eval=FALSE}
+gsea_c2_kimma <- BIGsea(gene_df = kimma_df, ID = "ENSEMBL", 
+                  category = "C2", subcategory = "CP")
+```
+
+#### GO gene sets (C5)
+
+```{r c5, eval=FALSE}
+gsea_c5_kimma <- BIGsea(gene_df = kimma_df, ID = "ENSEMBL", 
+                  category = "C5", subcategory = "GO:BP")
+```
+
+```{r eval=FALSE}
+save(gsea_h_kimma, gsea_c2_kimma, gsea_c5_kimma,
+     file = "results/gene_set/gsea_cell_TB.RData")
+```
+
+```{r echo=FALSE}
+load("results/gene_set/gsea_cell_TB.RData")
+```
+
+## Summarise GSEA results
+
+Significant for cell type within TB condition
+
+```{r echo=FALSE}
+gsea_all <- bind_rows(gsea_h_kimma, gsea_c2_kimma, gsea_c5_kimma) %>% 
+      mutate(model = "kimma") %>% 
+  mutate(gs_cat = paste(gs_cat, gs_subcat, sep= " - ")) %>% 
+  mutate(across(c(group, gs_cat), ~as.factor(.)))
+
+temp <- gsea_all %>% 
+  filter(FDR < 0.1) %>% 
+  count(model, group, gs_cat, .drop = FALSE) %>% 
+  filter(group %in% c("MDM_TB-AM_TB","MDM_Media-AM_Media")) %>% 
+  dplyr::rename(`FDR<0.1`=n)
+
+gsea_all %>% 
+  filter(FDR < 0.05) %>% 
+  count(model, group, gs_cat, .drop = FALSE) %>% 
+  filter(group %in% c("MDM_TB-AM_TB","MDM_Media-AM_Media")) %>% 
+  rename(`FDR<0.05`=n) %>% 
+  full_join(temp) %>% 
+  select(model, gs_cat, everything()) %>% 
+  arrange(model, gs_cat, group) %>% 
+  kable() %>% 
+  kable_styling(bootstrap_options = "striped", full_width = FALSE) %>% 
+  collapse_rows(1:3, valign="top")
+```
+
+Significant for TB within cell type
+
+```{r echo=FALSE}
+temp <- gsea_all %>% 
+  filter(FDR < 0.1) %>% 
+  count(model, group, gs_cat, .drop = FALSE) %>% 
+  filter(group %in% c("MDM_TB-MDM_Media","AM_TB-AM_Media")) %>% 
+  rename(`FDR<0.1`=n)
+
+gsea_all %>% 
+  filter(FDR < 0.05) %>% 
+  count(model, group, gs_cat, .drop = FALSE) %>% 
+  filter(group %in% c("MDM_TB-MDM_Media","AM_TB-AM_Media")) %>% 
+  rename(`FDR<0.05`=n) %>% 
+  full_join(temp) %>% 
+  select(model, gs_cat, everything()) %>% 
+  arrange(model,gs_cat, group) %>% 
+  kable() %>% 
+  kable_styling(bootstrap_options = "striped", full_width = FALSE) %>% 
+  collapse_rows(1:2, valign="top")
+```
+
+# Broad term enrichment
+
+Another way to utilize gene sets is to test for enrichment among genes of interest. 
+
+Convert gene list data frame to vectors without NA.
+
+```{r}
+for(x in colnames(gene_signif_kimma)){
+  x.name <- paste("kimma", x, sep="_")
+  vec.temp <- gene_signif_kimma %>% 
+    dplyr::select(all_of(x)) %>% 
+    drop_na() %>% 
+    unlist(use.names = FALSE)
+  
+  assign(x.name, vec.temp, envir=.GlobalEnv)
+}
+```
+
+## AM specific genes
+
+For this analysis, genes of interest must be significantly (FDR < 0.05):
+
+* TB-induced in AM but not MDM
+* different between cell types in media alone and/or TB alone 
+
+```{r warning=FALSE, message=FALSE, results=FALSE}
+enrich_AM_h <- BIGprofiler(gene_list = 
+                                   list(kimma_AM.up=c(kimma_AM.up.only,
+                                                      kimma_AM.up_MDM.down),
+                                        kimma_AM.down=c(kimma_AM.down.only,
+                                                        kimma_AM.down_MDM.up)), 
+                                 category = "H",
+                                 ID = "ENSEMBL")
+```
+
+#### Enrichment TB-induced AM summary
+
+H terms, FDR < 0.1
+
+```{r warning=FALSE, echo=FALSE, message=FALSE}
+enrich_AM_h %>% 
+  filter(FDR<=0.1) %>% 
+  dplyr::select(group, size_group,
+                pathway, `k/K`, FDR) %>% 
+  arrange(group, FDR) %>% 
+  
+  kable() %>% 
+  kable_styling(bootstrap_options = "striped", full_width = FALSE) %>% 
+  collapse_rows(1:2, valign="top")
+```
+
+## MDM specific genes
+
+Genes must be significantly (FDR < 0.05):
+
+* TB-induced in MDM but not AM
+* different between AM and MDM in media alone and/or TB alone 
+
+```{r warning=FALSE, message=FALSE, results=FALSE}
+enrich_MDM_h<- BIGprofiler(gene_list = 
+                                    list(kimma_MDM.up=c(kimma_MDM.up.only,
+                                                        kimma_AM.down_MDM.up),
+                                         kimma_MDM.down=c(kimma_MDM.down.only,
+                                                          kimma_AM.up_MDM.down)), 
+                                  category = "H",
+                                  ID = "ENSEMBL")
+```
+
+#### Enrichment TB-induced MDM summary
+
+H terms, FDR < 0.1
+
+```{r warning=FALSE, echo=FALSE, message=FALSE}
+enrich_MDM_h %>% 
+  filter(FDR<=0.1) %>% 
+  dplyr::select(group, size_group,
+                pathway, `k/K`, FDR) %>% 
+  arrange(group, FDR) %>% 
+  
+  kable() %>% 
+  kable_styling(bootstrap_options = "striped", full_width = FALSE) %>% 
+  collapse_rows(1:2, valign="top")
+```
+
+## Non-cell specific genes
+
+Genes must be significantly (FDR < 0.05):
+
+* TB-induced in MDM and AM in the same direction
+* no filtering for difference between AM and MDM in media alone or TB alone 
+
+```{r warning=FALSE, message=FALSE, results=FALSE}
+enrich_both_h <- BIGprofiler(gene_list = 
+                               list(kimma_both.up=kimma_AM.up_MDM.up,
+                                    kimma_both.down=kimma_AM.down_MDM.down), 
+                             category = "H",
+                             ID = "ENSEMBL")
+```
+
+#### Enrichment TB-induced non-cell specific summary
+
+H terms, FDR < 0.1
+
+```{r warning=FALSE, echo=FALSE, message=FALSE}
+enrich_both_h %>% 
+  filter(FDR<=0.1) %>% 
+  dplyr::select(group, size_group,
+                pathway, `k/K`, FDR) %>% 
+  arrange(group, FDR) %>% 
+  
+  kable() %>% 
+  kable_styling(bootstrap_options = "striped", full_width = FALSE) %>% 
+  collapse_rows(1:2, valign="top")
+```
+
+## Save enrichment results
+
+```{r}
+save(enrich_AM_h, enrich_both_h, enrich_MDM_h, 
+     file = "results/gene_set/enrich_cell_TB.RData")
+```
+
+## Compare genes in IFN related gene sets
+
+Several Hallmark terms are of interest based on the above analyses. Here, we delve to the gene level within these terms and quantify how many genes within each term are associated with changes in AM vs MDM.
+
+```{r echo=FALSE}
+options(knitr.kable.NA = '')
+# Get hallmark terms of interest
+H <- as.data.frame(msigdbr(species = "Homo sapiens",
+                           category = "H")) %>% 
+  filter(gs_name %in% c("HALLMARK_INTERFERON_ALPHA_RESPONSE",
+                        "HALLMARK_INTERFERON_GAMMA_RESPONSE")) %>% 
+  dplyr::select(gs_name, entrez_gene, gene_symbol) %>% 
+  mutate(entrez_gene = as.character(entrez_gene))
+
+all.genes2 <- list(
+  kimma_AM.up = c(kimma_AM.up.only, kimma_AM.up_MDM.down, kimma_AM.up_MDM.up),
+  kimma_AM.down = c(kimma_AM.down.only, kimma_AM.down_MDM.up, kimma_AM.down_MDM.down),
+  kimma_MDM.up = c(kimma_MDM.up.only, kimma_AM.down_MDM.up, kimma_AM.up_MDM.up),
+  kimma_MDM.down = c(kimma_MDM.down.only, kimma_AM.up_MDM.down, kimma_AM.down_MDM.down)) %>% 
+  plyr::ldply(., data.frame) %>% 
+  separate(col=".id", into=c("cell","FC"), sep="\\.") %>% 
+  pivot_wider(names_from = cell, values_from = FC) %>% 
+  dplyr::rename("geneName" = "X..i..")
+
+#Annot gene groups to complete Hallmark terms
+all.genes.annot2 <- clusterProfiler::bitr(all.genes2$geneName,
+                                         fromType="ENSEMBL",
+                        toType=c("ENTREZID"),
+                        OrgDb=org.Hs.eg.db) %>% 
+  full_join(all.genes2, by=c("ENSEMBL"="geneName")) %>% 
+  right_join(H, by=c("ENTREZID"="entrez_gene")) 
+```
+
+```{r echo=FALSE}
+all.genes.annot2 %>% 
+  dplyr::count(gs_name, kimma_AM, kimma_MDM) %>% 
+  arrange(gs_name, kimma_AM, kimma_MDM) %>% 
+  mutate(gs_name = gsub("HALLMARK_","", gs_name)) %>% 
+  mutate(size = ifelse(gs_name == "INTERFERON_ALPHA_RESPONSE", 97,
+                       200)) %>% 
+  dplyr::select(gs_name, size, everything()) %>% 
+  
+  kable(col.names = c("Description", "Term size",
+                      "kimma_AM", "kimma_MDM", "Total genes"),
+        align=c("l","l","c","c","c")) %>% 
+  kable_styling(bootstrap_options = "striped", full_width = FALSE) %>% 
+  collapse_rows(1:2, valign="top")
+```
+
+**IFN A and G**: It appears that both cell types increase genes expression in these pathways but AM have a larger IFNA response as show by the genes that go up *only* in AM. This is congruent with the GSEA fold change analysis. In contrast, IFNG response is mostly shared by the two cell types.
+
+It should also be noted that these gene sets have some overlap.
+
+```{r echo=FALSE}
+par(mfrow=c(1,1))
+for(term in unique(H$gs_name)){
+ genes <- H %>% 
+    filter(gs_name==term) %>% 
+    dplyr::select(gene_symbol) %>% unlist(use.names = FALSE)
+  
+  assign(term, genes, envir = .GlobalEnv)
+  }
+
+venn(ilab=FALSE, zcolor = "style",ilcs=1,sncs=1.5,box = FALSE,
+     snames=c("IFN A response",
+              "IFN G response"),
+     x=list(HALLMARK_INTERFERON_ALPHA_RESPONSE,
+            HALLMARK_INTERFERON_GAMMA_RESPONSE))
+title(sub="Overlap of Hallmark terms", 
+        line = -1, cex.sub=1.5)
+```
+
+And cell-type specific (top) and general (bottom) genes that go up with Mtb infection come from both shared and term specific genes.
+
+```{r echo=FALSE, fig.width=8.5}
+par(mfrow=c(1,2))
+for(term in unique(H$gs_name)){
+ genes <- H %>% 
+    filter(gs_name==term & 
+             gene_symbol %in% c(unlist(gene_signif_kimma.hgnc$AM.up.only),
+                                unlist(gene_signif_kimma.hgnc$AM.up_MDM.down))) %>% 
+    dplyr::select(gene_symbol) %>% unlist(use.names = FALSE)
+  
+  assign(term, genes, envir = .GlobalEnv)
+  }
+
+venn(ilab=FALSE, zcolor = "style",ilcs=1,sncs=1,box = FALSE,
+     snames=c("IFN A\nresponse",
+              "IFN G\nresponse"),
+     x=list(HALLMARK_INTERFERON_ALPHA_RESPONSE,
+            HALLMARK_INTERFERON_GAMMA_RESPONSE)
+     )
+title(sub="AM UP only genes in Hallmark terms", 
+        line = -1, cex.sub=1)
+
+for(term in unique(H$gs_name)){
+ genes <- H %>% 
+    filter(gs_name==term & 
+             gene_symbol %in% c(gene_signif_kimma.hgnc$MDM.up.only,
+                                gene_signif_kimma.hgnc$AM.down_MDM.up)) %>% 
+    dplyr::select(gene_symbol) %>% unlist(use.names = FALSE)
+  
+  assign(term, genes, envir = .GlobalEnv)
+  }
+
+venn(ilab=FALSE, zcolor = "style",ilcs=1,sncs=1,box = FALSE,
+     snames=c("IFN A\nresponse",
+              "IFN G\nresponse"),
+     x=list(HALLMARK_INTERFERON_ALPHA_RESPONSE,
+            HALLMARK_INTERFERON_GAMMA_RESPONSE)
+     )
+title(sub="MDM UP only genes in Hallmark terms", 
+        line = -1, cex.sub=1)
+```
+
+```{r echo=FALSE, fig.width=8.5}
+par(mfrow=c(1,1))
+for(term in unique(H$gs_name)){
+ genes <- H %>% 
+    filter(gs_name==term & 
+             gene_symbol %in% gene_signif_kimma.hgnc$AM.up_MDM.up) %>% 
+    dplyr::select(gene_symbol) %>% unlist(use.names = FALSE)
+  
+  assign(term, genes, envir = .GlobalEnv)
+  }
+
+venn(ilab=FALSE, zcolor = "style",ilcs=1,sncs=1,box = FALSE,
+     snames=c("IFN A\nresponse",
+              "IFN G\nresponse"),
+     x=list(HALLMARK_INTERFERON_ALPHA_RESPONSE,
+            HALLMARK_INTERFERON_GAMMA_RESPONSE)
+     )
+title(sub="AM and MDM UP genes in Hallmark terms", 
+        line = -1, cex.sub=1)
+```
+
+# R session
+
+```{r}
+sessionInfo()
+```
+
+***
