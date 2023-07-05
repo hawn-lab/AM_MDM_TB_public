@@ -1,0 +1,262 @@
+---
+title: "RNA-seq of AM and MDM infected with TB"
+subtitle: "Gene set enrichment analysis (GSEA)"
+author: "Kim Dill-McFarland, kadm@uw.edu"
+date: "version `r format(Sys.time(), '%B %d, %Y')`"
+output:
+  html_document:
+    toc: yes
+    toc_float:
+      collapsed: no
+editor_options:
+  chunk_output_type: console
+---
+# Background
+
+The purpose of this workflow is to perform GSEA of Mtb-infected vs media expression in AM vs MDM cells. Gene sets are from the Broad Molecular Signature Database ([MSigDB](https://www.gsea-msigdb.org/gsea/msigdb/collections.jsp)).
+
+# Setup
+Load packages
+
+```{r message=FALSE, warning=FALSE}
+# Data manipulation and figures
+library(tidyverse)
+library(BIGpicture)
+library(venn)
+
+#GSEA
+library(SEARchways)
+library(msigdbr)
+library(org.Hs.eg.db)
+
+#Print pretty tables to Rmd
+library(knitr)
+library(kableExtra)
+
+`%notin%` <- Negate(`%in%`)
+select <- dplyr::select
+rename <- dplyr::rename
+```
+
+Set seed
+
+```{r}
+set.seed(4389)
+```
+
+# Load data
+
+```{r results.data, message=FALSE, warning=FALSE}
+load("results/gene_level/kimma_IFN.RData")
+```
+
+# Gene set enrichment analysis (GSEA)
+Gene ontology ([GO](http://geneontology.org/)) provides gene functions and annotations from a variety of sources. Specifics on the gene sets below can be found at <http://software.broadinstitute.org/gsea/msigdb/collections.jsp>.
+
+## Format data
+
+```{r}
+gsea_df <- MDM.IFN_kimma_pval$lme.contrast %>% 
+  filter(contrast_ref == "untreated") %>% 
+  mutate(group = paste(contrast_lvl, contrast_ref, sep = "-")) %>% 
+  dplyr::select(group, gene, estimate, FDR)
+```
+
+## Run GSEA
+#### Hallmark (H)
+
+```{r h, eval=FALSE}
+gsea_h_kimma <- BIGsea(gene_df = gsea_df, ID = "ENSEMBL", category = "H")
+```
+
+#### Curated gene sets (C2 CP)
+
+```{r c2, eval=FALSE}
+gsea_c2_kimma <- BIGsea(gene_df = gsea_df, ID = "ENSEMBL", 
+                  category = "C2", subcategory = "CP")
+```
+
+#### GO gene sets (C5)
+
+```{r c5, eval=FALSE}
+gsea_c5_kimma <- BIGsea(gene_df = gsea_df, ID = "ENSEMBL", 
+                  category = "C5", subcategory = "GO:BP")
+```
+
+```{r eval=FALSE}
+save(gsea_h_kimma, gsea_c2_kimma, gsea_c5_kimma,
+     file = "results/gene_set/gsea_MDM_IFN.RData")
+```
+
+```{r echo=FALSE}
+load("results/gene_set/gsea_MDM_IFN.RData")
+```
+
+## GSEA summary
+
+Significant for at least 1 IFN
+
+```{r echo=FALSE}
+gsea_all <- bind_rows(gsea_h_kimma, gsea_c2_kimma, gsea_c5_kimma) %>% 
+      mutate(model = "kimma") %>% 
+  mutate(gs_cat = paste(gs_cat, gs_subcat, sep= " - ")) %>% 
+  mutate(across(c(group, gs_cat), ~as.factor(.)))
+
+temp <- gsea_all %>% 
+  filter(FDR < 0.1) %>% 
+  count(model, group, gs_cat, .drop = FALSE) %>% 
+  dplyr::rename(`FDR<0.1`=n)
+
+gsea_all %>% 
+  filter(FDR < 0.05) %>% 
+  count(model, group, gs_cat, .drop = FALSE) %>% 
+  rename(`FDR<0.05`=n) %>% 
+  full_join(temp) %>% 
+  select(model, gs_cat, everything()) %>% 
+  arrange(model, gs_cat, group) %>% 
+  kable() %>% 
+  kable_styling(bootstrap_options = "striped", full_width = FALSE) %>% 
+  collapse_rows(1:3, valign="top")
+```
+
+GSEA significant in only 1 IFN. These are FDR < 0.05 in one IFN and FDR > 0.2 in all others
+
+```{r echo=FALSE}
+gsea.specific.ls <- list()
+for(c in unique(gsea_all$group)){
+  ifn.temp <- gsea_all %>% 
+    filter(group == c & FDR < 0.05) %>% 
+    pull(pathway) %>% unique()
+  other.temp <- gsea_all %>% 
+    filter(group != c & FDR < 0.2) %>% 
+    pull(pathway) %>% unique()
+  gsea.specific.ls[[c]] <- gsea_all %>% 
+    filter(group == c & pathway %in% ifn.temp[!ifn.temp %in% other.temp]) %>% 
+    select(group, gs_cat, pathway, NES, FDR)
+}
+
+data.table::rbindlist(gsea.specific.ls) %>% 
+  kable() %>% 
+  kable_styling(bootstrap_options = "striped", full_width = FALSE) %>% 
+  collapse_rows(1:2, valign="top")
+```
+
+# Broad term enrichment
+
+Another way to utilize gene sets is to test for enrichment among genes of interest. 
+
+```{r}
+enrich_df <- MDM.IFN_kimma_pval$lme.contrast %>% 
+  filter(contrast_ref == "untreated") %>% 
+  filter(FDR < 0.05) %>% 
+  mutate(group = paste(contrast_lvl, contrast_ref, sep = "-")) %>% 
+  select(group, gene, FDR) %>% 
+  #Remove IFNL1 because too few genes
+  filter(group != "IFNL1-untreated")
+```
+
+```{r eval=FALSE}
+enrich_IFN_h <- BIGprofiler(gene_df = enrich_df, 
+                           category = "H",
+                           ID = "ENSEMBL")
+enrich_IFN_c5 <- BIGprofiler(gene_df = enrich_df, 
+                           category = "C5", subcategory = "GO:BP",
+                           ID = "ENSEMBL")
+```
+
+```{r eval=FALSE}
+save(enrich_IFN_h, enrich_IFN_c5,
+     file = "results/gene_set/enrich_MDM_IFN.RData")
+```
+
+```{r echo=FALSE}
+load("results/gene_set/enrich_MDM_IFN.RData")
+```
+
+#### Enrichment summary
+
+H terms, FDR < 0.1
+
+```{r warning=FALSE, echo=FALSE, message=FALSE}
+enrich_IFN_h %>% 
+  filter(FDR<=0.1) %>% 
+  dplyr::select(group, size_group,
+                pathway, `k/K`, FDR) %>% 
+  arrange(group, FDR) %>% 
+  
+  kable() %>% 
+  kable_styling(bootstrap_options = "striped", full_width = FALSE) %>% 
+  collapse_rows(1:2, valign="top")
+```
+
+#### Gene sets specific to only 1 IFN
+
+FDR < 0.05.
+
+```{r}
+par(mfrow=c(1,1))
+venn.ls5 <- list()
+
+for(g in unique(enrich_IFN_h$group)){
+  temp.signif <- enrich_IFN_h %>% 
+    filter(group==g & FDR < 0.05 & group_in_pathway > 1) %>% 
+    pull(pathway) %>% unique()
+  # temp.nonsignif <- enrich_IFN_h %>% 
+  #   filter(group!=g) %>% 
+  #   group_by(pathway) %>% 
+  #   summarise(minFDR = min(FDR, na.rm = TRUE)) %>% 
+  #   filter(minFDR >= 0.2) %>% 
+  #   pull(pathway) %>% unique()
+  
+  # venn.ls5[[g]] <- intersect(temp.signif, temp.nonsignif)
+  venn.ls5[[g]] <- temp.signif
+}
+
+venn(ilab=FALSE, zcolor = "style",ilcs=1, sncs=1,
+       x=venn.ls5, box=FALSE)
+
+#Unique IFNA8 GO terms
+venn.ls5[["IFNA8-untreated"]][!venn.ls5[["IFNA8-untreated"]]%in%unlist(venn.ls5[2:4])]
+```
+
+# Compare DEG to AM-MDM-TB experiment
+
+Getting the gene list
+
+```{r echo=FALSE}
+#Get AM MDM TB lists
+AM_MDM_list <- read.csv("../AM_MDM_TB/results/gene_level/AM-MDM_kimma.venn.signif.ensembl.csv")
+
+AM_all <- unique(c(AM_MDM_list$AM.up.only, AM_MDM_list$AM.down.only,
+                  AM_MDM_list$AM.up_MDM.down, AM_MDM_list$AM.down_MDM.up))
+AM_all <- AM_all[AM_all != ""]
+
+MDM_all <-  unique(c(AM_MDM_list$MDM.up.only, AM_MDM_list$MDM.down.only,
+                     AM_MDM_list$AM.up_MDM.down, AM_MDM_list$AM.down_MDM.up))
+MDM_all <- MDM_all[MDM_all != ""]
+```
+
+```{r echo=FALSE}
+par(mfrow=c(3,2))
+for(ifn in unique(MDM.IFN_kimma_pval$lme.contrast$contrast_lvl)){
+  venn.ls <- list()
+  venn.ls[[paste0("MDM\n+",ifn)]] <-  MDM.IFN_kimma_pval$lme.contrast %>% 
+    filter(contrast_ref == "untreated" & contrast_lvl == ifn) %>% 
+    filter(FDR < 0.05) %>% 
+    select(contrast_lvl, gene, estimate, FDR) %>% 
+    pull(gene) %>% unique()
+  venn.ls[["MDM-specific\n+Mtb"]] <- MDM_all
+  venn.ls[["AM-specific\n+Mtb"]] <- AM_all
+  
+  venn(ilab=FALSE, zcolor = "style",ilcs=1, sncs=1,
+       x=venn.ls, box=FALSE)
+}
+```
+
+# R session
+
+```{r}
+sessionInfo()
+```
+
+***

@@ -1,0 +1,115 @@
+---
+title: "RNA-seq of MDM stimulated with IFN"
+subtitle: "Differential gene expression"
+author: "Kim Dill-McFarland, kadm@uw.edu"
+date: "version `r format(Sys.time(), '%B %d, %Y')`"
+output:
+  html_document:
+    toc: yes
+    toc_float:
+      collapsed: no
+editor_options:
+  chunk_output_type: console
+---
+# Background
+
+This workflow determines differentially expressed genes in AM/MDM with and without Mtb-infection.
+
+# Setup
+Load packages
+
+```{r message=FALSE, warning=FALSE}
+# Data manipulation and figures
+library(tidyverse)
+library(patchwork)
+library(BIGpicture)
+library(venn)
+
+# Linear models
+library(limma)
+library(kimma)
+
+#Print pretty tables to Rmd
+library(knitr)
+library(kableExtra)
+  options(knitr.kable.NA = '')
+
+`%notin%` <- Negate(`%in%`)
+```
+
+Set seed
+
+```{r}
+set.seed(4389)
+```
+
+Make output directories.
+
+```{r}
+dir.create("results/gene_level", recursive = TRUE, showWarnings = FALSE)
+```
+
+# Load data
+
+Cleaned data created in [MDM IFN data cleaning](1.MDM-IFN_data_cleaning.html)
+
+```{r}
+#Load data
+load("data_clean/MDM-IFN_voom.RData")
+```
+
+This includes in the following samples.
+
+```{r echo=FALSE}
+dat.voom$targets %>% 
+  group_by(IFN) %>% 
+  tally() %>% 
+  
+  kable(align="l") %>% 
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+# Differential expression
+## PCA
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, fig.height=4}
+plot_pca(dat.voom, vars = c("IFN","ptID")) %>% 
+  wrap_plots(ncol=1)
+```
+
+## Linear mixed effects model (kimma)
+
+```{r eval=FALSE}
+MDM.IFN_kimma_pval <- kmFit(dat.voom, model = "~IFN + (1|ptID)",
+                            run.lme = TRUE, run.contrast = TRUE, 
+                            use.weights = TRUE,
+                            metrics = TRUE)
+#save
+save(MDM.IFN_kimma_pval, file="results/gene_level/kimma_IFN.RData")
+```
+
+```{r include=FALSE}
+load("results/gene_level/kimma_IFN.RData")
+```
+
+### Summarize gene models
+
+```{r echo=FALSE}
+summarise_lmFit(MDM.IFN_kimma_pval$lme.contrast) %>% 
+  filter(contrast_ref == "untreated") %>% 
+  select(-contrast_ref)
+```
+
+```{r echo=FALSE}
+temp <- MDM.IFN_kimma_pval$lme.contrast %>% 
+  filter(contrast_ref=="untreated" & contrast_lvl != "IFNL1")
+plot_venn_genes(list("lme"=temp), fdr.cutoff = 0.05)
+```
+
+# R session
+
+```{r}
+sessionInfo()
+```
+
+***
