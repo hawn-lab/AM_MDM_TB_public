@@ -1,0 +1,294 @@
+---
+title: "RNA-seq of AM with and without cryopreservation"
+author: "Kim Dill-McFarland, kadm@uw.edu"
+date: "version `r format(Sys.time(), '%B %d, %Y')`"
+output:
+  html_document:
+    toc: yes
+    toc_float:
+      collapsed: no
+editor_options:
+  chunk_output_type: console
+---
+
+# Background
+
+This workflow determines the impacts of cyropreservation on unstimulated and Mtb-infected AM.
+
+# Setup
+
+Load packages
+
+```{r message=FALSE, warning=FALSE}
+#Genome
+library(msigdbr)
+library(org.Hs.eg.db)
+
+# Data manipulation and figures
+library(plyr)
+library(tidyverse)
+library(cowplot)
+library(ggpubr)
+library(ggrepel)
+#Define ggplot colors
+logFC.cols <- c("Down, FDR < 0.05"="lightblue",
+                "Down, FDR < 0.01"="blue",
+                "Down, FDR < 0.001"="darkblue",
+                "NS"="grey",
+                "Up, FDR < 0.05"="pink",
+                "Up, FDR < 0.01"="red",
+                "Up, FDR < 0.001"="darkred")
+
+# Linear models
+library(limma)
+
+#Venn diagrams
+library(venn)
+
+#Print pretty tables to Rmd
+library(knitr)
+library(kableExtra)
+  options(knitr.kable.NA = '')
+
+`%notin%` <- Negate(`%in%`)
+
+knitr::opts_chunk$set(message=FALSE)
+```
+
+Set seed
+
+```{r}
+set.seed(4389)
+```
+
+# Load data
+
+Cleaned data created in [AM-MDM cryo data cleaning](1.AM-cryo_data_cleaning.html)
+
+```{r}
+#Load data
+load("data_clean/AM-cryo_voom.RData")
+```
+
+# Cryopreservation
+
+```{r echo=FALSE}
+dat.voom$targets %>% 
+  dplyr::count(cell, donorID, cryo, Mtb) %>%  
+  arrange(desc(donorID)) %>% 
+
+kable(align="l") %>% 
+  kable_styling(bootstrap_options = "striped", full_width = FALSE) %>% 
+  collapse_rows(1:3, valign="top")
+```
+
+## PCA
+
+```{r PCA.cryo, echo=FALSE, warning=FALSE}
+#Calculate PCA for all data.
+PCA.cryo <- as.data.frame(dat.voom$E) %>% 
+  t() %>% 
+  #Calc PCA
+  prcomp()
+
+PC1.label <- paste("PC1 (", summary(PCA.cryo)$importance[2,1]*100, "%)", sep="")
+PC2.label <-paste("PC2 (", summary(PCA.cryo)$importance[2,2]*100, "%)", sep="")
+
+# Extract PC values
+PCA.cryo.dat <- as.data.frame(PCA.cryo$x) %>% 
+  rownames_to_column("libID") %>%
+  # Select PCs for plotting
+  dplyr::select(libID, PC1:PC3) %>% 
+  # Merge with metadata
+  full_join(dat.voom$targets, by="libID")
+```
+
+```{r echo=FALSE}
+ggplot(PCA.cryo.dat, aes(PC1, PC2)) + 
+  geom_point(aes(color=cryo, shape=paste(donorID,Mtb,"batch",batch)),
+             size=3,stroke=2) +
+  scale_color_manual(values=c("#DB8E00","#00BD5C")) +
+  scale_shape_manual(values=c(21,16,22,15,17,18)) +
+  geom_line(aes(group=paste(donorID,Mtb))) +
+  #Beautify
+  theme_classic() +
+  theme(legend.title = element_blank(),
+        legend.position = "bottom",
+        legend.direction = "vertical") +
+  labs(x=PC1.label, y=PC2.label, title="voom normalized logCPM") +
+  coord_fixed(ratio=1) 
+```
+
+## Differential gene expression
+
+Since there are not enough samples to run linear models, we will use correlation and leading edge genes to compare paired fresh and cryopreserved samples.
+
+#### Expression correlation
+
+```{r echo=FALSE, fig.width=8.5, fig.height=8.5}
+plot2 <- as.data.frame(dat.voom$E) %>% 
+  rownames_to_column() %>% 
+  pivot_longer(-rowname, names_to = "libID") %>% 
+  full_join(dat.voom$targets) %>% 
+  dplyr::select(rowname:Mtb, -c(libID, group:libID.no)) %>% 
+  mutate(facet.lab = paste(donorID, Mtb, sep="\n")) %>%
+  pivot_wider(names_from = cryo) %>% 
+  mutate(facet.lab = ifelse(grepl("AM18", facet.lab),
+                            paste(facet.lab, "Different batches", sep="\n"),
+                            paste(facet.lab, "Same batch", sep="\n"))) %>% 
+  
+  ggplot(aes(x=fresh, y=cryo)) +
+  geom_point(alpha=0.5) +
+  facet_wrap(~facet.lab) +
+  geom_abline(aes(intercept = 0, slope = 1, color="1:1 fit"), 
+              size=1, show.legend = TRUE) +
+  geom_smooth(method="lm", formula = "y~x", se=FALSE, 
+              aes(color="True y~x fit"),
+              show.legend = TRUE) +
+  scale_color_manual(values=c("grey","red"), name="") +
+  theme_classic() +
+  coord_fixed() +
+  labs(title="Log2 CPM all genes") +
+  stat_cor(method = "pearson", color="red")
+
+plot2
+ggsave("figs/log.expression.corr.cryo.png",plot2, height=8, width=8)
+```
+
+#### Leading edge Mtb-media genes
+
+Calculate fold change.
+
+```{r}
+cryo.FC <- as.data.frame(dat.voom$E) %>% 
+  rownames_to_column() %>% 
+  pivot_longer(-rowname, names_to = "libID") %>% 
+  full_join(dat.voom$targets) %>% 
+  select(rowname:batch, -c(libID, group:libID.no, batch)) %>% 
+  pivot_wider(names_from = Mtb) %>% 
+  mutate(FC = mtb-media) %>% 
+  select(-media,-mtb) %>% 
+  mutate(FC.group = ifelse(FC<0,"down","up"),
+         facet.lab = ifelse(grepl("AM18", donorID),
+                            paste(donorID, "Different batches", sep="\n"),
+                            paste(donorID, "Same batch", sep="\n"))) %>% 
+  #add genes names
+  left_join(dat.voom$genes, by=c("rowname"="ensembl_gene_id"))
+```
+
+```{r echo=FALSE}
+genes <- 5
+```
+
+Plot fold change, labeling top `r genes` highest and lowest fold change genes.
+
+```{r echo=FALSE, fig.width=8.5, fig.height=8}
+# Find leading edge to label
+cryo.FC.max <- cryo.FC %>% 
+  group_by(facet.lab, cryo) %>% 
+  slice_max(order_by = FC, n=genes)
+cryo.FC.min <- cryo.FC %>% 
+  group_by(facet.lab, cryo) %>% 
+  slice_min(order_by = FC, n=genes)
+ 
+cryo.FC.lab <- cryo.FC %>% 
+  mutate(point.lab = ifelse(rowname %in% c(cryo.FC.max$rowname,
+                                           cryo.FC.min$rowname),
+                            symbol, NA))
+
+plot3 <- cryo.FC.lab %>% 
+  ggplot(aes(x=FC, y=cryo)) +
+  #Add non-labeled points
+  geom_jitter(data=filter(cryo.FC.lab, is.na(point.lab)),
+              aes(color=FC.group), alpha=0.5) +
+  #Add labeled points
+  geom_point(data=filter(cryo.FC.lab, !is.na(point.lab)),
+             aes(color=FC.group), alpha=0.5) +
+  #text labels
+  geom_jitter(aes(color=FC.group), alpha=0.5, width=0, height=0.4) +
+  geom_text_repel(data=filter(cryo.FC.lab, !is.na(point.lab)),
+                  aes(label=point.lab),
+                  direction="both",
+                  nudge_x=-0.4, min.segment.length = unit(0, 'lines'),
+                  show.legend = FALSE, size=3, max.overlaps = 100) +
+  facet_wrap(~facet.lab) +
+  scale_color_manual(values=c("blue","red"), name="Fold change") +
+  theme_classic() +
+  labs(y="",x="Mtb - media log2 fold change") +
+  theme(legend.position = "bottom")
+
+plot3
+ggsave("figs/leading.edge.fold.change.png",plot3, width=12, height=6)
+```
+
+#### Rank order
+
+Rank order fold changes. Listing genes within the top `r genes` of any sample.
+
+```{r echo=FALSE, message=FALSE}
+#rank positive and negative FC
+cryo.rank <- cryo.FC %>% 
+  group_by(donorID, cryo) %>%
+  mutate(rank.pos = rank(-FC, ties.method = "min"),
+         rank.neg = rank(FC, ties.method = "min")) %>% 
+  select(donorID, cell, cryo, symbol, rowname, 
+         rank.pos, rank.neg) %>% 
+  ungroup() %>% 
+  pivot_longer(rank.pos:rank.neg) %>% 
+  mutate(name=paste(cryo,name,sep=".")) %>% 
+  select(-cryo) %>% 
+  pivot_wider()
+
+#Add FC values to ranks
+cryo.rank.FC <- cryo.FC %>% 
+  select(donorID, cell, cryo, FC, symbol, rowname) %>% 
+  pivot_wider(names_from = cryo, values_from = FC) %>% 
+  rename(cryo.FC=cryo, fresh.FC=fresh) %>% 
+  full_join(cryo.rank) %>% 
+  #format
+  rename(ENSEMBLID=rowname) %>% 
+  mutate(batch = ifelse(donorID=="AM18","different","same"))  %>% 
+  select(donorID:ENSEMBLID, batch, 
+         cryo.rank.pos,fresh.rank.pos,
+         cryo.rank.neg, fresh.rank.neg, cryo.FC,fresh.FC)
+
+write_csv(cryo.rank.FC, "results/AM.cryo.fold.change.rank.csv")
+```
+
+```{r echo=FALSE}
+cryo.rank.FC %>% 
+  filter_at(vars(c(cryo.rank.pos,fresh.rank.pos)), any_vars(.<= genes)) %>% 
+  select(cell, donorID,  batch, symbol, 
+         cryo.rank.pos,fresh.rank.pos, cryo.FC,fresh.FC) %>% 
+  arrange(cell, donorID, symbol) %>% 
+
+  kable(caption = "Increased expression with Mtb infection",
+        col.names = c("cell","donorID","batch","HGNC symbol",
+                      "cryo","fresh","cryo","fresh")) %>% 
+  kable_styling(bootstrap_options = "striped", full_width = FALSE) %>% 
+  column_spec(c(4,6), border_right = TRUE) %>% 
+  collapse_rows(1:3, valign="top") %>% 
+  add_header_above(c(" "=4, "Positive fold change rank"=2, "Log2 fold change"=2))
+```
+
+```{r echo=FALSE}
+cryo.rank.FC %>% 
+  filter_at(vars(c(cryo.rank.neg,fresh.rank.neg)), any_vars(.<= genes)) %>% 
+  select(cell, donorID,  batch, symbol, 
+         cryo.rank.neg,fresh.rank.neg, cryo.FC,fresh.FC) %>% 
+  arrange(cell, donorID, symbol) %>% 
+
+  kable(caption = "Decreased expression with Mtb infection",
+        col.names = c("cell","donorID","batch","HGNC symbol",
+                      "cryo","fresh","cryo","fresh")) %>% 
+  kable_styling(bootstrap_options = "striped", full_width = FALSE) %>% 
+  column_spec(c(4,6), border_right = TRUE) %>% 
+  collapse_rows(1:3, valign="top") %>% 
+  add_header_above(c(" "=4, "Negitive fold change rank"=2, "Log2 fold change"=2))
+```
+
+# R session
+
+```{r}
+sessionInfo()
+```

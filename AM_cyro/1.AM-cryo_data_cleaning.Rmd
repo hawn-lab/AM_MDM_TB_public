@@ -1,0 +1,445 @@
+---
+title: "RNA-seq of AM with and without cryopreservation"
+subtitle: "Data cleaning"
+author: "Kim Dill-McFarland, kadm@uw.edu"
+output:
+  html_document:
+    toc: yes
+    toc_float:
+      collapsed: no
+date: "version `r format(Sys.time(), '%B %d, %Y')`"
+editor_options: 
+  chunk_output_type: console
+---
+# Background
+
+The purpose of this workflow is to complete basic data cleaning of metadata and count table. This includes 1) removing low quality libraries, 2) removing outlying libraries, 3) filtering rare genes, and 4) normalizing for RNA composition and voom. 
+
+# Setup
+Load packages
+
+```{r setup, message=FALSE, warning=FALSE}
+# Data manipulation and figures
+library(tidyverse)
+  # Modify ggplot data order within facets
+  library(drlib)
+  # Plot log scales
+  library(scales)
+  #Multi-panel figures
+  library(patchwork)
+  #Custom 
+  library(BIGpicture)
+library(readxl)
+#Venn diagrams
+library(venn)
+
+# Empirical analysis of digital gene expression data
+## Data normalization
+library(edgeR)
+library(RNAetc)
+
+# Genome reference
+# Do not load due to conflicts with tidyverse
+# library(biomaRt)
+
+# Print pretty table to knit file
+library(knitr)
+library(kableExtra)
+  options(knitr.kable.NA = '')
+  
+#Create 'not in' operator
+`%notin%` <- Negate(`%in%`)
+```
+
+Set seed
+
+```{r}
+set.seed(927)
+```
+
+Make output directories.
+
+```{r}
+dir.create("data_clean/", recursive = TRUE, showWarnings = FALSE)
+```
+
+# Customization
+
+Set variable names and cutoffs for this workflow.
+
+```{r custom}
+#Directory WITHIN project directory that holds raw count, metadata, and gene key
+data.dir <- "data_raw"
+
+#Provide file basename
+#This will be appended to the start of all file names saved to the disk
+basename <- "AM-cryo"
+
+#List main variables of interest
+#Will be used to visualize data in tables and plots
+#If > 2 variables provided, plots are not colored by variables
+vars_of_interest <- c("Mtb","cryo")
+
+# Define cutoffs
+#Median CV coverage MAXIMUM
+CV.cut <- 1
+#Alignment percentage with duplicates MINIMUM
+align.cut <- 0.95
+#Total sequences MINIMUM
+count.cut <- 1E6
+```
+
+# Read in and format data 
+#### Metadata
+
+Includes alignment metrics and total sequences retained during command line cleaning. Filter to samples of interest. Extract additional data from libIDs.
+
+```{r}
+meta <- read_csv("data_raw/cleaning.metrics.csv") %>% 
+  #remove MACMAC samples
+  separate(libID, into = c("libID.no","donorID"), sep="_", 
+           extra="drop", remove = FALSE) %>% 
+  mutate(libID.no = as.numeric(libID.no)) %>% 
+  filter(libID.no >= 69) %>% 
+  #Add addtl info
+  mutate(cell = ifelse(grepl("AM",libID),"AM","MDM"),
+         cryo = ifelse(grepl("Cryo",libID) | !grepl("AM",libID),
+                       "cryo", "fresh"),
+         Mtb = ifelse(grepl("MTB", libID),"mtb","media"),
+         treat.hr = ifelse(libID.no >= 75 & libID.no <= 82, "24hr",
+                           ifelse(libID.no >= 69 & libID.no <= 74, "6hr", NA)),
+         IFN = ifelse(grepl("IFN", libID),
+                      gsub("[0-9]{1,2}_C[0-9]{3}_|[0-9]{1,2}_AM[0-9]{2}_Cryo_",
+                                            "",libID),"none"),
+         batch=2) 
+```
+
+Add AM18 samples from AM-MDM-TB sequencing.
+
+```{r}
+AM18 <- read_csv("../AM_MDM_TB/data_raw/AM.MDM.data.cleaning.metrics.csv") %>% 
+  filter(grepl("AM18_AM", sampID)) %>% 
+  rename(libID=sampID) %>% 
+  #Add metadata
+  mutate(cell="AM", cryo="fresh",
+         Mtb=ifelse(grepl("TB",libID),"mtb","media"),
+         IFN="none",donorID="AM18",batch=1,libID.no=c(100,101)) 
+
+meta <- meta %>% 
+  #Add AM18 from previous run
+  full_join(AM18) %>% 
+  select(libID.no, libID, donorID, cell:batch, everything())
+```
+
+Switch media/mtb labels for libraries 69-74. See `scripts/MTB_identity_check.R` for details.
+
+```{r}
+meta.clean <- meta %>% 
+  mutate(Mtb = ifelse(libID.no <= 74 & Mtb == "media", "mtb",
+                        ifelse(libID.no <= 74 & Mtb == "mtb", "media",
+                               Mtb)))
+```
+
+#### Counts
+
+Counts of reads in genes, exons only.
+
+```{r}
+counts.raw <- read_tsv("data_raw/AM.MDM.IFN.featurecounts.paired.tsv",
+                      skip=1) %>% 
+  select(-c(Chr:Length))
+
+#Create simplified names list
+name.list <- sub("project/results.am/bam_filter_paired/",
+                 "", names(counts.raw))
+name.list <- sub("_filter_paired.bam",
+                 "", name.list)
+
+#Format counts and filter to samples of interest
+counts <- counts.raw %>% 
+  #Rename columns
+  setNames(name.list) %>% 
+  rename(ensembl_gene_id = Geneid) %>% 
+  select(ensembl_gene_id, all_of(meta.clean$libID[1:14]))
+```
+
+Add AM18 sample
+
+```{r}
+AM18.counts <- read_tsv("../AM_MDM_TB/data_raw/AM.MDM.featurecounts.paired.tsv",
+                      skip=1) %>% 
+  select(Geneid, contains("AM18_AM"))
+
+#Create simplified names list
+name.list2 <- sub("project1/data/bam_filter_paired/",
+                 "", names(AM18.counts))
+name.list2 <- sub("_filter_paired.bam",
+                 "", name.list2)
+
+#Format counts and add to other data set
+counts.all <- AM18.counts %>% 
+  #Rename columns
+  setNames(name.list2) %>% 
+  rename(ensembl_gene_id = Geneid) %>% 
+  full_join(counts) %>% 
+  #remove genes not in both dataset
+  filter_all(all_vars(!is.na(.)))
+```
+
+## Filter to cyro relevant samples
+
+```{r}
+meta.clean.filter <- meta.clean %>% 
+  filter(IFN == "none" & cell == "AM") %>% 
+  filter(is.na(treat.hr) | treat.hr == "6hr")
+
+counts.all.filter <- counts.all %>% 
+  select(1, all_of(meta.clean.filter$libID))
+```
+
+## Summarize samples
+
+```{r echo=FALSE}
+meta.clean.filter %>% 
+  count(cell, Mtb, cryo) %>% 
+  kable(align="l",
+      caption="Total libraries") %>% 
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+# Data cleaning
+## Filter protein coding genes
+
+Load key and filter to pc genes with valid HGNC names.
+
+```{r key, message=FALSE}
+#Get database
+ensembl <- biomaRt::useEnsembl(biomart="ensembl", dataset="hsapiens_gene_ensembl")
+
+#Format gene key
+key <- biomaRt::getBM(attributes=c("ensembl_gene_id", "entrezgene_id", "hgnc_symbol", 
+                                   "gene_biotype", "chromosome_name",
+                                   "start_position", "end_position"), mart=ensembl) 
+
+key.filter <- key %>% 
+  #Filter protein coding genes
+  filter(gene_biotype == "protein_coding") %>% 
+  #Filter protein coding genes in count table
+  filter(ensembl_gene_id %in% counts.all.filter$ensembl_gene_id) %>% 
+  #collapse multiannotations.
+  group_by(ensembl_gene_id, hgnc_symbol, gene_biotype, 
+           chromosome_name, start_position, end_position) %>% 
+  summarise(entrezgene_id = list(unique(entrezgene_id)), .groups = "drop") %>% 
+  group_by(ensembl_gene_id, entrezgene_id, gene_biotype, 
+           chromosome_name, start_position, end_position) %>% 
+  summarise(symbol = list(unique(hgnc_symbol)), .groups = "drop") %>% 
+  arrange(ensembl_gene_id)
+```
+
+Filter count table to protein coding genes.
+
+```{r}
+counts.pc <- counts.all.filter %>% 
+  filter(ensembl_gene_id %in% key.filter$ensembl_gene_id) %>% 
+  arrange(ensembl_gene_id)
+```
+
+#### Check genes
+
+*all genes in the key are found in the data. And vice versa.*
+
+```{r echo=FALSE}
+identical(key.filter$ensembl_gene_id, counts.pc$ensembl_gene_id)
+```
+
+## Assess library coverage
+#### Median CV coverage vs. mapped duplicate reads
+
+Compare the median coefficient of variation (CV) coverage (`median_cv_coverage`) and percent alignment of reads with duplicates (`mapped_reads_w_dups`). Ideally, you want libraries with LOW median CV coverage and HIGH percent aligned duplicates, indicating low variability in coverage over the length of genes and high coverage across the genome, respectively. 
+
+Plot CV coverage vs alignment. Samples outside the cutoff assigned above are labeled with sampID.
+
+```{r cv.dups, echo=FALSE}
+#Color/shapes based on number of variables of interest
+ggplot(meta.clean.filter,
+                  aes(MEDIAN_CV_COVERAGE, PCT_PF_ALIGNED)) +
+           geom_point(size=3) +
+  # Add cutoff lines
+  geom_hline(yintercept=align.cut, linetype=2) +
+  geom_vline(xintercept=CV.cut, linetype=2) +
+  #Beautify
+  theme_classic() +
+  theme(legend.position = "bottom") +
+  labs(x="Median CV coverage", y="Mapped reads with duplicates") +
+  lims(x=c(0,1.05), y=c(0,1.05))
+```
+
+#### Total aligned counts
+
+Assess aligned counts per library. Higher counts indicate high coverage and are preferred. 
+
+Plot total counts per library. Libraries outside cutoffs are labeled as "questionable". The minimum total sequences cutoff set above is indicated by a horizontal line.
+
+```{r tot.seqs, echo=FALSE, fig.width=8.5}
+counts.all.filter %>% 
+  pivot_longer(-ensembl_gene_id, names_to = "libID") %>% 
+  group_by(libID) %>% 
+  summarise(seqs = sum(value)) %>% 
+
+  ggplot(aes(x=reorder(libID, seqs), 
+           y=seqs))  +
+    geom_col() +
+  # Add cutoff line
+  geom_hline(yintercept = count.cut)+
+  # Beautify
+  theme_classic() +
+  theme(axis.text.x = element_text(size=rel(0.75),angle = 90, hjust = 1),
+        legend.position = "bottom") +
+  labs(x="Library", y="Total aligned counts\n(Log scale)", fill="") +
+  scale_x_reordered() +
+  scale_y_continuous(trans = 'log10',
+    breaks = trans_breaks("log10", function(x) 10^x),
+    labels = trans_format("log10", math_format(10^.x)))
+```
+
+### Filter by library coverage
+
+All libraries have high median CV coverage values. Given the small sample sizes, all libraries will be retained at this point.
+
+## Assess PCA
+
+```{r PCA.all, echo=FALSE, warning=FALSE}
+plot_pca(counts.pc, meta = meta, vars = c(vars_of_interest, "outlier"),
+        outlier_group = "Mtb") %>% 
+  wrap_plots(ncol = 1)
+```
+
+### Filter PCA outliers
+
+There are no outliers in these data.
+
+## Create DGEList object
+
+For use in gene filtering with edgeR
+
+```{r dgelist}
+dat.pc <- DGEList(
+  #count table. move gene names to column names
+  counts=as.matrix(column_to_rownames(counts.pc,
+                                      "ensembl_gene_id")),
+  #metadata
+  samples=meta.clean.filter,
+  #keep genes in count table
+  genes=key.filter)
+```
+
+## Filter rare genes
+
+The raw gene sets contain highly variable, low abundance/rare genes. We retain abundant genes at > 0.1 CPM in at least 2 samples.
+
+```{r}
+dat.pc.abund <- filter_rare(dat.pc, min.CPM = 0.1, min.sample = 2, plot = TRUE)
+```
+
+```{r echo=FALSE}
+#Count genes removed
+genes <- nrow(dat.pc$genes)
+genes.abund <- nrow(dat.pc.abund$genes)
+#Save removed genes list
+rare <- dat.pc$genes %>% 
+  filter(ensembl_gene_id %notin% dat.pc.abund$genes$ensembl_gene_id) %>% 
+  select(ensembl_gene_id) %>% 
+  distinct(ensembl_gene_id) %>% unlist(use.names = FALSE)
+not.pc <- counts %>% 
+  filter(ensembl_gene_id %notin% key.filter$ensembl_gene_id) %>% 
+  select(ensembl_gene_id) %>% 
+  distinct(ensembl_gene_id) %>% unlist(use.names = FALSE)
+
+counts %>% 
+  select(ensembl_gene_id) %>% 
+  mutate(removed = ifelse(ensembl_gene_id %in% not.pc, "not protein coding",
+                    ifelse(ensembl_gene_id %in% rare, "rare", NA))) %>% 
+  filter(!is.na(removed)) %>% 
+  left_join(key) %>% 
+  write_csv("results/AM-cyro_rare_genes_removed.csv")
+```
+
+This removes `r genes-genes.abund` (~ `r round((genes-genes.abund)/genes*100, digits=0)`%) genes. See `results/AM-MDM_rare_genes_removed.csv` for info on genes removed.
+
+## Normalize for RNA composition
+
+Calculate factors to scale library sizes.
+
+```{r norm}
+dat.pc.abund.norm <- calcNormFactors(dat.pc.abund)
+```
+
+## Normalize with voom
+
+```{r voom3}
+dat.pc.abund.norm.voom <- voomWithQualityWeights(
+                          dat.pc.abund.norm,
+                          design=model.matrix(~Mtb,
+                                 data=dat.pc.abund.norm$samples),
+                          plot=TRUE)
+```
+
+## PCA final data set
+
+```{r PCA.final, echo=FALSE, warning=FALSE}
+plot_pca(dat.pc.abund.norm.voom, meta = meta, vars = c(vars_of_interest, "outlier"),
+        outlier_group = "Mtb") %>% 
+  wrap_plots(ncol = 1)
+```
+
+## Summarize cleaning
+
+```{r echo=FALSE}
+data.frame(
+  label = c("High median CV coverage samples",
+            "Low alignment percentage samples",
+            "Low total sequences samples",
+            "PCA outlier samples",
+            "Rare genes"),
+  value = c(0,0,0,0,
+        nrow(dat.pc$genes)-nrow(dat.pc.abund$genes))) %>% 
+kable(align="l",col.names = c("","Removed")) %>% 
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+# Save data
+
+Write as RData
+
+```{r}
+#Rename to short form
+dat <- dat.pc
+dat.voom <- dat.pc.abund.norm.voom
+
+save(dat, 
+     file=paste("data_clean/", basename, "_count.RData", sep=""))
+save(dat.voom, 
+     file=paste("data_clean/", basename, "_voom.RData", sep=""))
+```
+
+Write counts as table.
+
+```{r}
+#Counts table
+as.data.frame(dat.pc.abund.norm.voom$E) %>% 
+  #Add hgnc
+  rownames_to_column("ensembl_gene_id") %>% 
+  left_join(dat.pc.abund.norm.voom$genes, by="ensembl_gene_id") %>% 
+  select(ensembl_gene_id, symbol, gene_biotype, everything()) %>%
+  select(-c(entrezgene_id:end_position)) %>% 
+  
+write_csv(paste("data_clean/", basename, "_voom.csv", sep=""))
+```
+
+# R session
+
+```{r}
+sessionInfo()
+```
+
+***

@@ -1,0 +1,168 @@
+/home/ec2-user/project/results.mtb/bam/69_AM18_Cryo_MTB_Aligned.sortedByCoord.out.bam
+26834 + 0 in total (QC-passed reads + QC-failed reads)
+12164 + 0 secondary
+0 + 0 supplementary
+0 + 0 duplicates
+26834 + 0 mapped (100.00% : N/A)
+14670 + 0 paired in sequencing
+7335 + 0 read1
+7335 + 0 read2
+14670 + 0 properly paired (100.00% : N/A)
+14670 + 0 with itself and mate mapped
+0 + 0 singletons (0.00% : N/A)
+0 + 0 with mate mapped to a different chr
+0 + 0 with mate mapped to a different chr (mapQ>=5)
+/home/ec2-user/project/results.mtb/bam/70_AM18_Cryo_Media_Aligned.sortedByCoord.out.bam
+64029 + 0 in total (QC-passed reads + QC-failed reads)
+19042 + 0 secondary
+0 + 0 supplementary
+0 + 0 duplicates
+64029 + 0 mapped (100.00% : N/A)
+44987 + 0 paired in sequencing
+22494 + 0 read1
+22493 + 0 read2
+44986 + 0 properly paired (100.00% : N/A)
+44986 + 0 with itself and mate mapped
+1 + 0 singletons (0.00% : N/A)
+0 + 0 with mate mapped to a different chr
+0 + 0 with mate mapped to a different chr (mapQ>=5)
+/home/ec2-user/project/results.mtb/bam/71_AM21_MTB_Aligned.sortedByCoord.out.bam
+21508 + 0 in total (QC-passed reads + QC-failed reads)
+9970 + 0 secondary
+0 + 0 supplementary
+0 + 0 duplicates
+21508 + 0 mapped (100.00% : N/A)
+11538 + 0 paired in sequencing
+5769 + 0 read1
+5769 + 0 read2
+11538 + 0 properly paired (100.00% : N/A)
+11538 + 0 with itself and mate mapped
+0 + 0 singletons (0.00% : N/A)
+0 + 0 with mate mapped to a different chr
+0 + 0 with mate mapped to a different chr (mapQ>=5)
+/home/ec2-user/project/results.mtb/bam/72_AM21_Media_Aligned.sortedByCoord.out.bam
+52552 + 0 in total (QC-passed reads + QC-failed reads)
+10258 + 0 secondary
+0 + 0 supplementary
+0 + 0 duplicates
+52552 + 0 mapped (100.00% : N/A)
+42294 + 0 paired in sequencing
+21147 + 0 read1
+21147 + 0 read2
+42294 + 0 properly paired (100.00% : N/A)
+42294 + 0 with itself and mate mapped
+0 + 0 singletons (0.00% : N/A)
+0 + 0 with mate mapped to a different chr
+0 + 0 with mate mapped to a different chr (mapQ>=5)
+/home/ec2-user/project/results.mtb/bam/73_AM21_Cryo_MTB_Aligned.sortedByCoord.out.bam
+40738 + 0 in total (QC-passed reads + QC-failed reads)
+15516 + 0 secondary
+0 + 0 supplementary
+0 + 0 duplicates
+40738 + 0 mapped (100.00% : N/A)
+25222 + 0 paired in sequencing
+12611 + 0 read1
+12611 + 0 read2
+25222 + 0 properly paired (100.00% : N/A)
+25222 + 0 with itself and mate mapped
+0 + 0 singletons (0.00% : N/A)
+0 + 0 with mate mapped to a different chr
+0 + 0 with mate mapped to a different chr (mapQ>=5)
+/home/ec2-user/project/results.mtb/bam/74_AM21_Cryo_Media_Aligned.sortedByCoord.out.bam
+66002 + 0 in total (QC-passed reads + QC-failed reads)
+22878 + 0 secondary
+0 + 0 supplementary
+0 + 0 duplicates
+66002 + 0 mapped (100.00% : N/A)
+43124 + 0 paired in sequencing
+21562 + 0 read1
+21562 + 0 read2
+43124 + 0 properly paired (100.00% : N/A)
+43124 + 0 with itself and mate mapped
+0 + 0 singletons (0.00% : N/A)
+0 + 0 with mate mapped to a different chr
+0 + 0 with mate mapped to a different chr (mapQ>=5)
+/home/ec2-user/project/results.mtb/bam_filter_paired/69_AM18_Cryo_MTB_filter_paired.bam
+9584 + 0 in total (QC-passed reads + QC-failed reads)
+0 + 0 secondary
+0 + 0 supplementary
+0 + 0 duplicates
+9584 + 0 mapped (100.00% : N/A)
+9584 + 0 paired in sequencing
+4792 + 0 read1
+4792 + 0 read2
+9584 + 0 properly paired (100.00% : N/A)
+9584 + 0 with itself and mate mapped
+0 + 0 singletons (0.00% : N/A)
+0 + 0 with mate mapped to a different chr
+0 + 0 with mate mapped to a different chr (mapQ>=5)
+/home/ec2-user/project/results.mtb/bam_filter_paired/70_AM18_Cryo_Media_filter_paired.bam
+36972 + 0 in total (QC-passed reads + QC-failed reads)
+0 + 0 secondary
+0 + 0 supplementary
+0 + 0 duplicates
+36972 + 0 mapped (100.00% : N/A)
+36972 + 0 paired in sequencing
+18486 + 0 read1
+18486 + 0 read2
+36972 + 0 properly paired (100.00% : N/A)
+36972 + 0 with itself and mate mapped
+0 + 0 singletons (0.00% : N/A)
+0 + 0 with mate mapped to a different chr
+0 + 0 with mate mapped to a different chr (mapQ>=5)
+/home/ec2-user/project/results.mtb/bam_filter_paired/71_AM21_MTB_filter_paired.bam
+7432 + 0 in total (QC-passed reads + QC-failed reads)
+0 + 0 secondary
+0 + 0 supplementary
+0 + 0 duplicates
+7432 + 0 mapped (100.00% : N/A)
+7432 + 0 paired in sequencing
+3716 + 0 read1
+3716 + 0 read2
+7432 + 0 properly paired (100.00% : N/A)
+7432 + 0 with itself and mate mapped
+0 + 0 singletons (0.00% : N/A)
+0 + 0 with mate mapped to a different chr
+0 + 0 with mate mapped to a different chr (mapQ>=5)
+/home/ec2-user/project/results.mtb/bam_filter_paired/72_AM21_Media_filter_paired.bam
+38026 + 0 in total (QC-passed reads + QC-failed reads)
+0 + 0 secondary
+0 + 0 supplementary
+0 + 0 duplicates
+38026 + 0 mapped (100.00% : N/A)
+38026 + 0 paired in sequencing
+19013 + 0 read1
+19013 + 0 read2
+38026 + 0 properly paired (100.00% : N/A)
+38026 + 0 with itself and mate mapped
+0 + 0 singletons (0.00% : N/A)
+0 + 0 with mate mapped to a different chr
+0 + 0 with mate mapped to a different chr (mapQ>=5)
+/home/ec2-user/project/results.mtb/bam_filter_paired/73_AM21_Cryo_MTB_filter_paired.bam
+18536 + 0 in total (QC-passed reads + QC-failed reads)
+0 + 0 secondary
+0 + 0 supplementary
+0 + 0 duplicates
+18536 + 0 mapped (100.00% : N/A)
+18536 + 0 paired in sequencing
+9268 + 0 read1
+9268 + 0 read2
+18536 + 0 properly paired (100.00% : N/A)
+18536 + 0 with itself and mate mapped
+0 + 0 singletons (0.00% : N/A)
+0 + 0 with mate mapped to a different chr
+0 + 0 with mate mapped to a different chr (mapQ>=5)
+/home/ec2-user/project/results.mtb/bam_filter_paired/74_AM21_Cryo_Media_filter_paired.bam
+33666 + 0 in total (QC-passed reads + QC-failed reads)
+0 + 0 secondary
+0 + 0 supplementary
+0 + 0 duplicates
+33666 + 0 mapped (100.00% : N/A)
+33666 + 0 paired in sequencing
+16833 + 0 read1
+16833 + 0 read2
+33666 + 0 properly paired (100.00% : N/A)
+33666 + 0 with itself and mate mapped
+0 + 0 singletons (0.00% : N/A)
+0 + 0 with mate mapped to a different chr
+0 + 0 with mate mapped to a different chr (mapQ>=5)
