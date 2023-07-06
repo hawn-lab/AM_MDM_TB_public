@@ -31,7 +31,7 @@ df_list[["AM vs MDM in TB"]] <- am.mdm %>%
 #Save
 write.xlsx(df_list, "TableS1_AM.Mtb.linear.models.xlsx")
 
-#### S4: MDM IFN linear model ####
+#### S5: MDM IFN linear model ####
 df_list2 <- list()
 
 load("../MDM_IFN/results/gene_level/kimma_IFN.RData")
@@ -59,7 +59,7 @@ df_list2[["IFNg in MDM"]] <- mdm.ifn %>%
 #Save
 write.xlsx(df_list2, "TableS5_MDM.IFN.linear.models.xlsx")
 
-###### S2: Enrich ######
+###### S3: Enrich ######
 load("../AM_MDM_TB/results/gene_set/enrich_cell_TB.RData")
 
 df_list3 <- list()
@@ -103,7 +103,7 @@ df_list3[["MDM-specific DEG"]] <- enrich_MDM_h %>%
 #Save
 write.xlsx(df_list3, "TableS3_DEG.Hallmark.xlsx")
 
-##### GSEA #####
+##### S4: GSEA #####
 df_list4 <- list()
 
 load("../AM_MDM_TB/results/gene_set/gsea_cell_TB.RData")
@@ -136,7 +136,7 @@ df_list4[["AM vs MDM in TB"]] <- gsea_h_kimma %>%
 #Save
 write.xlsx(df_list4, "TableS4_GSEA.xlsx")
 
-#### S5: MDM IFN Enrich ####
+#### S6: MDM IFN Enrich ####
 load("../MDM_IFN/results/gene_set/enrich_MDM_IFN.RData")
 attach("../MDM_IFN/data_clean/MDM-IFN_voom.RData")
 
@@ -174,7 +174,7 @@ temp %>%
   mutate(across(ensembl_gene_id:symbol, ~as.character(.))) %>% 
   write.xlsx(., file = "TableS6_IFNA_enrich_unique.xlsx")
 
-##### AM and MDM specific DEG #####
+##### S2: AM and MDM specific DEG #####
 deg <- read_csv("../AM_MDM_TB/results/gene_level/AM-MDM_kimma.venn.signif.ensembl.csv") %>%
   rownames_to_column() %>%
   pivot_longer(-rowname,names_to="DEG_group", values_to="ensembl_gene_id") %>%
@@ -195,13 +195,13 @@ deg <- read_csv("../AM_MDM_TB/results/gene_level/AM-MDM_kimma.venn.signif.ensemb
 def_fdr <- am.mdm %>%
   inner_join(contrast.OI) %>% 
   mutate(name = case_when(contrast_ref=="AM Media" & contrast_lvl=="AM TB"~
-                            "TB in AM",
+                            "TB in AM FDR",
                           contrast_ref=="MDM Media" & contrast_lvl=="MDM TB"~
-                            "TB in MDM",
+                            "TB in MDM FDR",
                           contrast_ref=="AM Media" & contrast_lvl=="MDM Media"~
-                            "AM vs MDM in media",
+                            "AM vs MDM in media FDR",
                           contrast_ref=="AM TB" & contrast_lvl=="MDM TB"~
-                            "AM vs MDM in TB")) %>% 
+                            "AM vs MDM in TB FDR")) %>% 
   select(ensembl_gene_id, name, FDR) %>% 
   pivot_wider(values_from = FDR) %>% 
   right_join(deg) %>% 
